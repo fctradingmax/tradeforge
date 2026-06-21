@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import TradeModal from '@/components/TradeModal'
+import { useRouter } from 'next/navigation'
 
 interface Trade {
   id: string
@@ -34,29 +34,17 @@ const MONTHS = ['January','February','March','April','May','June','July','August
 const DAYS   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 
 function m(v: number) { return (v >= 0 ? '+$' : '-$') + Math.abs(v).toFixed(2) }
-function fmtDur(sec: number | null) {
-  if (!sec) return '—'
-  if (sec < 60) return `${sec}s`
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60 > 0 ? sec % 60 + 's' : ''}`
-  return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`
-}
 
 export default function CalendarPage() {
-  const [trades, setTrades]         = useState<Trade[]>([])
-  const [loading, setLoading]       = useState(true)
-  const [setups, setSetups]         = useState<string[]>([])
-  const [selectedDate, setSelectedDate] = useState<string | null>(null)
-  const [selectedTrade, setSelectedTrade] = useState<Trade | null>(null)
+  const router = useRouter()
+  const [trades, setTrades]     = useState<Trade[]>([])
+  const [loading, setLoading]   = useState(true)
   const [curYear, setCurYear]   = useState(() => new Date().getFullYear())
   const [curMonth, setCurMonth] = useState(() => new Date().getMonth())
 
   useEffect(() => {
-    Promise.all([
-      fetch('/api/trades').then(r => r.json()),
-      fetch('/api/setups').then(r => r.json()),
-    ]).then(([t, s]) => {
+    fetch('/api/trades').then(r => r.json()).then(t => {
       if (Array.isArray(t)) setTrades(t)
-      if (Array.isArray(s)) setSetups(s)
     }).finally(() => setLoading(false))
   }, [])
 
@@ -104,12 +92,10 @@ export default function CalendarPage() {
   function prevMonth() {
     if (curMonth === 0) { setCurYear(y => y - 1); setCurMonth(11) }
     else setCurMonth(m => m - 1)
-    setSelectedDate(null)
   }
   function nextMonth() {
     if (curMonth === 11) { setCurYear(y => y + 1); setCurMonth(0) }
     else setCurMonth(m => m + 1)
-    setSelectedDate(null)
   }
 
   function dateStr(day: number) {
@@ -119,10 +105,6 @@ export default function CalendarPage() {
   const today = new Date()
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
 
-  const dayTrades = selectedDate ? (byDate[selectedDate] ?? []).sort((a, b) =>
-    (a.open_time ?? '') < (b.open_time ?? '') ? -1 : 1
-  ) : []
-  const dayNet = dayTrades.reduce((s, t) => s + t.net_pnl, 0)
 
   if (loading) {
     return <div className="p-8 text-center text-[#4a5266] text-sm">Cargando…</div>
@@ -168,11 +150,8 @@ export default function CalendarPage() {
           </div>
         )}
 
-        {/* Main grid: calendar + day detail */}
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-4">
-
-          {/* Calendar */}
-          <div className="bg-[#11151f] border border-[#232a3a] rounded-xl overflow-hidden">
+        {/* Calendar */}
+        <div className="bg-[#11151f] border border-[#232a3a] rounded-xl overflow-hidden">
             {/* Day headers */}
             <div className="grid grid-cols-7 border-b border-[#232a3a]">
               {DAYS.map(d => (
@@ -183,34 +162,30 @@ export default function CalendarPage() {
             {/* Cells */}
             <div className="grid grid-cols-7" style={{ gridAutoRows: '100px' }}>
               {cells.map((day, i) => {
-                if (!day) return <div key={i} className="border-b border-r border-[#1a1f2e] last:border-r-0" />
+                if (!day) return <div key={i} className="border-b border-r border-[#1a1f2e]" />
 
-                const ds    = dateStr(day)
-                const ts    = byDate[ds] ?? []
-                const net   = ts.reduce((s, t) => s + t.net_pnl, 0)
-                const isWin = net > 0.001
-                const isLoss = net < -0.001
+                const ds       = dateStr(day)
+                const ts       = byDate[ds] ?? []
+                const net      = ts.reduce((s, t) => s + t.net_pnl, 0)
+                const isWin    = net > 0.001
+                const isLoss   = net < -0.001
                 const hasTrades = ts.length > 0
                 const isToday  = ds === todayStr
-                const isSelected = ds === selectedDate
 
                 let bg = ''
                 let borderAccent = 'border-[#1a1f2e]'
                 if (isWin)  { bg = 'bg-[rgba(34,197,94,0.06)]';  borderAccent = 'border-[rgba(34,197,94,0.15)]' }
                 if (isLoss) { bg = 'bg-[rgba(239,68,68,0.06)]';  borderAccent = 'border-[rgba(239,68,68,0.15)]' }
-                if (isSelected) borderAccent = 'border-[#f59e0b]'
 
                 return (
                   <div
                     key={i}
-                    onClick={() => setSelectedDate(isSelected ? null : ds)}
-                    className={`relative border-b border-r ${borderAccent} ${bg} p-2 flex flex-col cursor-pointer transition-colors hover:bg-[#161b28] group`}
+                    onClick={() => hasTrades && router.push(`/trades?date=${ds}`)}
+                    className={`relative border-b border-r ${borderAccent} ${bg} p-2 flex flex-col transition-colors ${hasTrades ? 'cursor-pointer hover:bg-[#161b28]' : ''}`}
                   >
-                    {/* Day number */}
                     <div className={`text-xs font-semibold mb-1 ${isToday ? 'w-5 h-5 flex items-center justify-center rounded-full bg-[#f59e0b] text-[#0b0e16]' : 'text-[#6d7589]'}`}>
                       {day}
                     </div>
-
                     {hasTrades && (
                       <>
                         <div className={`text-[13px] font-semibold font-mono leading-tight ${isWin ? 'text-[#22c55e]' : isLoss ? 'text-[#ef4444]' : 'text-[#a4abbe]'}`}>
@@ -221,98 +196,12 @@ export default function CalendarPage() {
                         </div>
                       </>
                     )}
-
-                    {isSelected && (
-                      <div className="absolute top-0 left-0 right-0 h-[2px] bg-[#f59e0b]" />
-                    )}
                   </div>
                 )
               })}
             </div>
-          </div>
-
-          {/* Day detail panel */}
-          <div className="bg-[#11151f] border border-[#232a3a] rounded-xl overflow-hidden flex flex-col">
-            {!selectedDate ? (
-              <div className="flex-1 flex items-center justify-center text-[#4a5266] text-sm px-6 text-center">
-                Haz clic en un día para ver sus trades
-              </div>
-            ) : (
-              <>
-                {/* Day header */}
-                <div className="px-4 py-3 border-b border-[#232a3a] bg-[#161b28]">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold text-[#e8ecf2]">{selectedDate}</span>
-                    {dayTrades.length > 0 && (
-                      <span className={`text-sm font-semibold font-mono ${dayNet >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]'}`}>
-                        {m(dayNet)}
-                      </span>
-                    )}
-                  </div>
-                  {dayTrades.length > 0 && (
-                    <div className="text-[11px] text-[#4a5266] mt-0.5">
-                      {dayTrades.length} trade{dayTrades.length !== 1 ? 's' : ''} · {dayTrades.filter(t => t.net_pnl > 0.001).length}W / {dayTrades.filter(t => t.net_pnl < -0.001).length}L
-                    </div>
-                  )}
-                </div>
-
-                {dayTrades.length === 0 ? (
-                  <div className="flex-1 flex items-center justify-center text-[#4a5266] text-sm">
-                    Sin trades este día
-                  </div>
-                ) : (
-                  <div className="flex-1 overflow-y-auto divide-y divide-[#1a1f2e]">
-                    {dayTrades.map(t => {
-                      const tag = t.net_pnl > 0.001 ? 'W' : t.net_pnl < -0.001 ? 'L' : 'BE'
-                      const tagColor = tag === 'W'
-                        ? 'text-[#22c55e] bg-[rgba(34,197,94,0.1)]'
-                        : tag === 'L'
-                        ? 'text-[#ef4444] bg-[rgba(239,68,68,0.1)]'
-                        : 'text-[#f59e0b] bg-[rgba(245,158,11,0.1)]'
-                      const netColor = t.net_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]'
-                      return (
-                        <div
-                          key={t.id}
-                          onClick={() => setSelectedTrade(t)}
-                          className="px-4 py-3 hover:bg-[#161b28] cursor-pointer transition-colors"
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-bold text-[#e8ecf2]" style={{ fontFamily: 'JetBrains Mono, monospace' }}>{t.symbol}</span>
-                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${tagColor}`}>{tag}</span>
-                            </div>
-                            <span className={`text-sm font-semibold font-mono ${netColor}`}>{m(t.net_pnl)}</span>
-                          </div>
-                          <div className="flex items-center justify-between text-[11px] text-[#4a5266]" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
-                            <span>{t.open_time?.slice(0, 8) ?? ''} → {t.close_time?.slice(0, 8) ?? ''}</span>
-                            <span>{fmtDur(t.holding_sec)} · {t.max_size ?? '—'} sh</span>
-                          </div>
-                          {t.setup && (
-                            <div className="mt-1 text-[10px] text-[#6d7589]">{t.setup}</div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-
         </div>
       </div>
-
-      {selectedTrade && (
-        <TradeModal
-          trade={selectedTrade}
-          setups={setups}
-          onClose={() => setSelectedTrade(null)}
-          onSaved={updated => {
-            setTrades(prev => prev.map(t => t.id === updated.id ? updated : t))
-            setSelectedTrade(updated)
-          }}
-        />
-      )}
     </>
   )
 }

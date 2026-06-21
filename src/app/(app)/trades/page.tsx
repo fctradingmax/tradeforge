@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
+import { useSearchParams } from 'next/navigation'
 import TradeModal from '@/components/TradeModal'
 
 interface Trade {
@@ -61,9 +62,10 @@ function exportCsv(trades: Trade[]) {
 }
 
 export default function TradesPage() {
+  const searchParams = useSearchParams()
   const [trades, setTrades] = useState<Trade[]>([])
   const [loading, setLoading] = useState(true)
-  const [dateFilter, setDateFilter] = useState('')
+  const [dateFilter, setDateFilter] = useState(() => searchParams.get('date') ?? '')
   const [selectedTrade, setSelectedTrade] = useState<Trade | null>(null)
   const [setups, setSetups] = useState<string[]>([])
 
