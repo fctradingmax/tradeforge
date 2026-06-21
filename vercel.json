@@ -2,13 +2,5 @@
   "framework": "nextjs",
   "buildCommand": "npm run build",
   "devCommand": "npm run dev",
-  "installCommand": "npm install",
-  "env": {
-    "NEXT_PUBLIC_SUPABASE_URL": "@supabase_url",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "@supabase_anon_key",
-    "SUPABASE_SERVICE_ROLE_KEY": "@supabase_service_role_key",
-    "ANTHROPIC_API_KEY": "@anthropic_api_key",
-    "FINNHUB_API_KEY": "@finnhub_api_key",
-    "NEXT_PUBLIC_APP_URL": "@app_url"
-  }
+  "installCommand": "npm install"
 }
