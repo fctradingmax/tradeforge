@@ -24,7 +24,7 @@ function fmtM(n: number | null) {
   if (n == null) return '—'
   if (Math.abs(n) >= 1e9) return (n / 1e9).toFixed(1) + 'B'
   if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(1) + 'M'
-  return n.toLocaleString()
+  return n.toLocaleString('en-US')
 }
 
 export default function WatchlistPage() {

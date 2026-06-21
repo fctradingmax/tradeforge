@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const symbol = searchParams.get('symbol')
   const date = searchParams.get('date')
-  const limit = parseInt(searchParams.get('limit') ?? '500')
+  const limit = parseInt(searchParams.get('limit') ?? '2000')
 
   let query = supabase
     .from('trades')

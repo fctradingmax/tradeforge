@@ -75,7 +75,7 @@ export default function AlertsPage() {
                 <span className="text-xs font-mono font-semibold text-[#f59e0b] mr-2">{a.symbol}</span>
               )}
               <span className="text-sm text-[#e8ecf2]">{a.message}</span>
-              <p className="text-xs text-[#4a5266] mt-0.5">{new Date(a.created_at).toLocaleString()}</p>
+              <p className="text-xs text-[#4a5266] mt-0.5">{new Date(a.created_at).toLocaleString('en-US')}</p>
             </div>
             {!a.is_read && (
               <button
