@@ -25,7 +25,9 @@ interface Trade {
   setup: string | null
   quality: string | null
   emotion: string | null
+  tags: string[] | null
   notes: string | null
+  lessons: string | null
 }
 
 function m(v: number) {

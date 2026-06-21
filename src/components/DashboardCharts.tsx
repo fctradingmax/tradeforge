@@ -36,7 +36,7 @@ export function EquityChart({ data }: { data: EquityPoint[] }) {
           <Tooltip
             contentStyle={{ background: '#11151f', border: '1px solid #232a3a', borderRadius: 6, fontSize: 12, fontFamily: 'JetBrains Mono, monospace' }}
             labelStyle={{ color: '#a4abbe', marginBottom: 4 }}
-            formatter={(v: number) => [m(v), 'Acum.']}
+            formatter={(v: unknown) => [m(v as number), 'Acum.']}
           />
           <ReferenceLine y={0} stroke="#232a3a" />
           <Area type="monotone" dataKey="cum" stroke="#f59e0b" strokeWidth={2} fill="url(#eq-grad)" dot={false} activeDot={{ r: 4, fill: '#f59e0b' }} />
@@ -57,7 +57,7 @@ export function SymbolChart({ data }: { data: SymPoint[] }) {
           <YAxis tick={{ fill: '#6d7589', fontSize: 10, fontFamily: 'JetBrains Mono, monospace' }} tickLine={false} axisLine={false} tickFormatter={v => '$' + v.toFixed(0)} width={60} />
           <Tooltip
             contentStyle={{ background: '#11151f', border: '1px solid #232a3a', borderRadius: 6, fontSize: 12, fontFamily: 'JetBrains Mono, monospace' }}
-            formatter={(v: number) => m(v)}
+            formatter={(v: unknown) => m(v as number)}
           />
           <Legend wrapperStyle={{ fontSize: 11, color: '#a4abbe' }} />
           <Bar dataKey="gross" name="Bruto" fill="#3b82f6" radius={[2, 2, 0, 0]} />

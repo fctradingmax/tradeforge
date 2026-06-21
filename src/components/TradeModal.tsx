@@ -237,7 +237,8 @@ export default function TradeModal({ trade, onClose, onSaved, setups }: Props) {
         borderUpColor: '#22c55e', borderDownColor: '#ef4444',
         wickUpColor: '#22c55e', wickDownColor: '#ef4444',
       })
-      series.setData(candles)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      series.setData(candles as any)
 
       // Store refs so the fills effect can apply markers independently
       seriesRef.current = series
