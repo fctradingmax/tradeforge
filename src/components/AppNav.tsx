@@ -9,6 +9,7 @@ const NAV_LINKS = [
   { href: '/dashboard', label: 'Dashboard', icon: '▦' },
   { href: '/trades',    label: 'Trades',    icon: '⇅' },
   { href: '/calendar',  label: 'Calendar',  icon: '▣' },
+  { href: '/reports',   label: 'Reports',   icon: '≡' },
   { href: '/watchlist', label: 'Watchlist', icon: '◎' },
   { href: '/chat',      label: 'AI Agent',  icon: '✦' },
   { href: '/alerts',    label: 'Alerts',    icon: '🔔' },
