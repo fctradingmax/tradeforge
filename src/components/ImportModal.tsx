@@ -197,34 +197,81 @@ export default function ImportButton() {
 
   function close() { setOpen(false); reset() }
 
+  function applyParsed(headers: string[], rows: Record<string, string>[]) {
+    const isTF      = isTradeForgeFormat(headers)
+    const detected  = autoMap(headers)
+    setFile({ headers, rows, isTF })
+    setMapping(detected)
+    setCheck(null)
+    setStep('mapping')
+    setErr('')
+    if (isTF) {
+      const parsed = rows
+        .map(r => rowToTrade(r, detected))
+        .filter(t => t.symbol && t.date && t.net_pnl !== undefined)
+      setTimeout(() => runCheck(parsed), 0)
+    }
+  }
+
+  function isExcel(f: File) {
+    return f.name.endsWith('.xlsx') || f.name.endsWith('.xls') ||
+      f.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+      f.type === 'application/vnd.ms-excel'
+  }
+
   function loadFile(f: File) {
-    if (!f.name.endsWith('.csv') && !f.type.includes('csv') && !f.type.includes('text')) {
-      setErr('Por favor selecciona un archivo CSV.'); return
+    const isCsv = f.name.endsWith('.csv') || f.type.includes('csv') || f.type.includes('text/plain')
+    if (!isCsv && !isExcel(f)) {
+      setErr('Por favor selecciona un archivo CSV o Excel (.xls, .xlsx).'); return
     }
-    const reader = new FileReader()
-    reader.onload = e => {
-      try {
-        const text = e.target?.result as string
-        const { headers, rows } = parseCsv(text)
-        const isTF = isTradeForgeFormat(headers)
-        const detected = autoMap(headers)
-        setFile({ headers, rows, isTF })
-        setMapping(detected)
-        setCheck(null)
-        setStep('mapping')
-        setErr('')
-        // Auto-check when TradeForge format is fully auto-mapped
-        if (isTF) {
-          const parsed = rows
-            .map(r => rowToTrade(r, detected))
-            .filter(t => t.symbol && t.date && t.net_pnl !== undefined)
-          setTimeout(() => runCheck(parsed), 0)
+
+    if (isExcel(f)) {
+      const reader = new FileReader()
+      reader.onload = async e => {
+        try {
+          const buffer = e.target?.result as ArrayBuffer
+          const XLSX   = await import('xlsx')
+          const wb     = XLSX.read(buffer, { type: 'array', cellDates: true })
+          const ws     = wb.Sheets[wb.SheetNames[0]]
+          const raw    = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '' })
+          if (!raw.length) { setErr('La hoja está vacía.'); return }
+          const headers = (raw[0] as unknown[]).map(h => String(h ?? '').trim()).filter(Boolean)
+          const rows    = (raw.slice(1) as unknown[][])
+            .filter(r => r.some(v => v !== '' && v != null))
+            .map(r => {
+              const obj: Record<string, string> = {}
+              headers.forEach((h, i) => {
+                const v = r[i]
+                // cellDates: true gives Date objects for date cells
+                if (v instanceof Date) {
+                  const mm = String(v.getMonth() + 1).padStart(2, '0')
+                  const dd = String(v.getDate()).padStart(2, '0')
+                  obj[h] = `${v.getFullYear()}-${mm}-${dd}`
+                } else {
+                  obj[h] = String(v ?? '').trim()
+                }
+              })
+              return obj
+            })
+          applyParsed(headers, rows)
+        } catch {
+          setErr('No se pudo leer el archivo Excel.')
         }
-      } catch {
-        setErr('No se pudo leer el archivo CSV.')
       }
+      reader.readAsArrayBuffer(f)
+    } else {
+      const reader = new FileReader()
+      reader.onload = e => {
+        try {
+          const text            = e.target?.result as string
+          const { headers, rows } = parseCsv(text)
+          applyParsed(headers, rows)
+        } catch {
+          setErr('No se pudo leer el archivo CSV.')
+        }
+      }
+      reader.readAsText(f)
     }
-    reader.readAsText(f)
   }
 
   const onDrop = useCallback((e: React.DragEvent) => {
@@ -313,13 +360,13 @@ export default function ImportButton() {
                     }`}
                   >
                     <div className="text-[32px] mb-3 opacity-40">↑</div>
-                    <p className="text-[13px] text-[#a4abbe] font-medium">Arrastra tu CSV aquí o haz clic para buscar</p>
-                    <p className="text-[11px] text-[#4a5266] mt-1">Soporta el formato de exportación de TradeForge y CSVs genéricos</p>
+                    <p className="text-[13px] text-[#a4abbe] font-medium">Arrastra tu archivo aquí o haz clic para buscar</p>
+                    <p className="text-[11px] text-[#4a5266] mt-1">CSV · Excel XLS · Excel XLSX</p>
                   </div>
                   <input
                     ref={inputRef}
                     type="file"
-                    accept=".csv,text/csv,text/plain"
+                    accept=".csv,.xls,.xlsx,text/csv,text/plain,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     className="hidden"
                     onChange={e => { const f = e.target.files?.[0]; if (f) loadFile(f) }}
                   />
@@ -327,7 +374,8 @@ export default function ImportButton() {
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-[#4a5266] mb-2">Formatos soportados</p>
                     <ul className="space-y-1 text-[11px] text-[#6d7589]">
                       <li>• <span className="text-[#a4abbe]">TradeForge CSV</span> — exportado desde la página de Trades (auto-detectado)</li>
-                      <li>• <span className="text-[#a4abbe]">CSV genérico</span> — cualquier CSV con columnas mapeables (Symbol, Date, Net P&L requeridos)</li>
+                      <li>• <span className="text-[#a4abbe]">Excel XLS / XLSX</span> — primera hoja del libro, fechas convertidas automáticamente</li>
+                      <li>• <span className="text-[#a4abbe]">CSV genérico</span> — cualquier CSV con columnas mapeables</li>
                     </ul>
                     <p className="text-[10px] text-[#2f384c] mt-3 font-mono">Columnas mínimas: Symbol, Date, Net P&L</p>
                   </div>
