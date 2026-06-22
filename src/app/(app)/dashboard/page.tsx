@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import DashboardClient from '@/components/DashboardClient'
+import ImportButton from '@/components/ImportModal'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,9 +24,13 @@ export default async function DashboardPage() {
   if (trades.length === 0) {
     return (
       <div className="p-8 text-[#e8ecf2]">
-        <h1 className="text-2xl font-bold tracking-tight mb-6">Dashboard</h1>
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-[18px] font-semibold tracking-tight">Dashboard</h1>
+          <ImportButton />
+        </div>
         <div className="rounded-lg bg-[#11151f] border border-[#232a3a] p-12 text-center text-[#4a5266]">
-          <p className="text-sm">No hay trades todavía.</p>
+          <p className="text-sm mb-3">No hay trades todavía.</p>
+          <p className="text-xs">Usa <strong className="text-[#6d7589]">↑ Importar CSV</strong> para cargar tu historial.</p>
         </div>
       </div>
     )
@@ -131,7 +136,10 @@ export default async function DashboardPage() {
 
   return (
     <div className="p-8 text-[#e8ecf2]" style={{ fontFamily: 'Inter, sans-serif' }}>
-      <h1 className="text-[18px] font-semibold tracking-tight mb-6">Dashboard</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-[18px] font-semibold tracking-tight">Dashboard</h1>
+        <ImportButton />
+      </div>
 
       {/* KPI Row */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5 mb-6">
