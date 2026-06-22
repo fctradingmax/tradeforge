@@ -64,6 +64,7 @@ export default function TradeModal({ trade, onClose, onSaved, setups }: Props) {
   const [lessons, setLessons] = useState(trade.lessons ?? '')
   const [saving, setSaving]   = useState(false)
   const [saved, setSaved]     = useState(!!trade.setup || !!trade.notes)
+  const [localSetups, setLocalSetups] = useState<string[]>(setups)
   const [iv, setIv]           = useState('1m')
   const [chartStatus, setChartStatus] = useState<{ msg: string; err: boolean } | null>(null)
   const [fills, setFills]       = useState<Fill[]>([])
@@ -281,6 +282,14 @@ export default function TradeModal({ trade, onClose, onSaved, setups }: Props) {
 
   async function save() {
     setSaving(true)
+    // Register new setup name in the setups table (fire-and-forget)
+    if (setup && !localSetups.includes(setup)) {
+      fetch('/api/setups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: setup }),
+      }).then(r => r.ok && setLocalSetups(prev => [...prev, setup].sort()))
+    }
     const body = { setup: setup || null, quality: quality || null, emotion: emotion || null, tags: tags.length ? tags : null, notes: notes || null, lessons: lessons || null }
     const res = await fetch(`/api/trades/${trade.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     if (res.ok) {
@@ -427,13 +436,16 @@ export default function TradeModal({ trade, onClose, onSaved, setups }: Props) {
             {/* Setup */}
             <div>
               <label className="block text-[10px] font-semibold uppercase tracking-[0.1em] text-[#6d7589] mb-1.5">Setup / Estrategia</label>
-              <div className="flex gap-2">
-                <select value={setup} onChange={e => { setSetup(e.target.value); setSaved(false) }}
-                  className="flex-1 bg-[#161b28] border border-[#2f384c] text-[#e8ecf2] px-2.5 py-1.5 rounded-md text-xs focus:outline-none focus:border-[#f59e0b]">
-                  <option value="">— Sin definir —</option>
-                  {setups.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
+              <input
+                list={`setup-list-${trade.id}`}
+                value={setup}
+                onChange={e => { setSetup(e.target.value); setSaved(false) }}
+                placeholder="Escribe o elige un setup…"
+                className="w-full bg-[#161b28] border border-[#2f384c] text-[#e8ecf2] px-2.5 py-1.5 rounded-md text-xs focus:outline-none focus:border-[#f59e0b] placeholder-[#4a5266]"
+              />
+              <datalist id={`setup-list-${trade.id}`}>
+                {localSetups.map(s => <option key={s} value={s} />)}
+              </datalist>
             </div>
 
             {/* Quality + Emotion */}
