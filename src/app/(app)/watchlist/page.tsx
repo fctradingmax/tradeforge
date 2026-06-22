@@ -76,20 +76,67 @@ function Sparkline({ id }: { id: string }) {
   )
 }
 
+function htmlToText(html: string | null) {
+  return (html ?? '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .trim()
+}
+
+function textToHtml(text: string) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>')
+}
+
 function WatchlistCard({
   entry,
   quote,
   onRefresh,
   onRemove,
+  onNotesSaved,
   refreshing,
 }: {
   entry: WatchlistEntry
   quote: LiveQuote | null
   onRefresh: () => void
   onRemove: () => void
+  onNotesSaved: (id: string, notes_html: string) => void
   refreshing: boolean
 }) {
   const router = useRouter()
+  const [editingNotes, setEditingNotes] = useState(false)
+  const [draft, setDraft]               = useState('')
+  const [saving, setSaving]             = useState(false)
+
+  function startEdit() {
+    setDraft(htmlToText(entry.notes_html))
+    setEditingNotes(true)
+  }
+
+  function cancelEdit() {
+    setEditingNotes(false)
+    setDraft('')
+  }
+
+  async function saveNotes() {
+    setSaving(true)
+    const notes_html = draft.trim() ? textToHtml(draft.trim()) : null
+    const res = await fetch(`/api/watchlist/${entry.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notes_html }),
+    })
+    if (res.ok) {
+      onNotesSaved(entry.id, notes_html ?? '')
+      setEditingNotes(false)
+      setDraft('')
+    }
+    setSaving(false)
+  }
+
   const isUp    = (quote?.change ?? 0) >= 0
   const priceClr = isUp ? 'text-[#22c55e]' : 'text-[#ef4444]'
   const borderClr = isUp ? 'border-[rgba(34,197,94,0.15)]' : 'border-[rgba(239,68,68,0.15)]'
@@ -123,6 +170,13 @@ function WatchlistCard({
               {new Date(entry.last_refreshed).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
             </span>
           )}
+          <button
+            onClick={startEdit}
+            className="text-[#4a5266] hover:text-[#a4abbe] text-xs transition-colors"
+            title="Editar notas"
+          >
+            ✎
+          </button>
           <button
             onClick={onRefresh}
             disabled={refreshing}
@@ -211,12 +265,49 @@ function WatchlistCard({
         </div>
       </div>
 
-      {entry.notes_html && (
-        <div
-          className="text-[10px] text-[#4a5266] border-t border-[#1a1f2e] pt-2 line-clamp-2"
-          dangerouslySetInnerHTML={{ __html: entry.notes_html }}
-        />
-      )}
+      {/* Notes section */}
+      <div className="border-t border-[#1a1f2e] pt-2">
+        {editingNotes ? (
+          <div className="flex flex-col gap-2">
+            <textarea
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              placeholder="Escribe tus notas aquí…"
+              rows={4}
+              autoFocus
+              className="w-full bg-[#0b0e16] border border-[#2f384c] rounded-md px-3 py-2 text-[11px] text-[#e8ecf2] placeholder-[#4a5266] resize-none focus:outline-none focus:border-[#f59e0b] font-mono leading-relaxed"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={saveNotes}
+                disabled={saving}
+                className="px-3 py-1 rounded bg-[#f59e0b] text-[#0b0e16] text-[10px] font-semibold hover:bg-[#d97706] disabled:opacity-50 transition-colors"
+              >
+                {saving ? 'Guardando…' : 'Guardar'}
+              </button>
+              <button
+                onClick={cancelEdit}
+                className="px-3 py-1 rounded bg-[#1a1f2e] text-[#6d7589] text-[10px] hover:text-[#a4abbe] transition-colors"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        ) : entry.notes_html ? (
+          <div
+            onClick={startEdit}
+            className="text-[11px] text-[#6d7589] leading-relaxed cursor-text hover:text-[#a4abbe] transition-colors"
+            dangerouslySetInnerHTML={{ __html: entry.notes_html }}
+          />
+        ) : (
+          <button
+            onClick={startEdit}
+            className="text-[10px] text-[#2f384c] hover:text-[#4a5266] transition-colors italic"
+          >
+            + Agregar notas…
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -271,6 +362,10 @@ export default function WatchlistPage() {
       setError(d.error ?? 'Failed to add ticker')
     }
     setAdding(false)
+  }
+
+  function handleNotesSaved(id: string, notes_html: string) {
+    setEntries(prev => prev.map(e => e.id === id ? { ...e, notes_html: notes_html || null } : e))
   }
 
   async function removeTicker(id: string) {
@@ -361,6 +456,7 @@ export default function WatchlistPage() {
               quote={quotes[w.symbol] ?? null}
               onRefresh={() => refreshTicker(w.id)}
               onRemove={() => removeTicker(w.id)}
+              onNotesSaved={handleNotesSaved}
               refreshing={refreshingId === w.id}
             />
           ))}
