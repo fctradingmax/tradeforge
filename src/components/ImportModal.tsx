@@ -186,11 +186,13 @@ export default function ImportButton() {
   const [file, setFile]   = useState<ParsedFile | null>(null)
   const [mapping, setMapping] = useState<Record<string, string>>({})
   const [result, setResult] = useState<{ imported: number; skipped: number } | null>(null)
+  const [check, setCheck]  = useState<{ new: number; duplicates: number; total: number } | null>(null)
+  const [checking, setChecking] = useState(false)
   const [err, setErr]     = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
   function reset() {
-    setStep('idle'); setFile(null); setMapping({}); setResult(null); setErr('')
+    setStep('idle'); setFile(null); setMapping({}); setResult(null); setCheck(null); setErr('')
   }
 
   function close() { setOpen(false); reset() }
@@ -208,8 +210,16 @@ export default function ImportButton() {
         const detected = autoMap(headers)
         setFile({ headers, rows, isTF })
         setMapping(detected)
+        setCheck(null)
         setStep('mapping')
         setErr('')
+        // Auto-check when TradeForge format is fully auto-mapped
+        if (isTF) {
+          const parsed = rows
+            .map(r => rowToTrade(r, detected))
+            .filter(t => t.symbol && t.date && t.net_pnl !== undefined)
+          setTimeout(() => runCheck(parsed), 0)
+        }
       } catch {
         setErr('No se pudo leer el archivo CSV.')
       }
@@ -229,6 +239,24 @@ export default function ImportButton() {
 
   const previewRows = trades.slice(0, 5)
 
+  const mappedRequired = FIELDS.filter(f => f.required).every(f => mapping[f.key])
+
+  async function runCheck(tradeList: typeof trades) {
+    if (!tradeList.length) return
+    setChecking(true)
+    setCheck(null)
+    try {
+      const res = await fetch('/api/trades/import?check=true', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trades: tradeList }),
+      })
+      const d = await res.json()
+      if (res.ok) setCheck(d)
+    } catch { /* silent — check is informational */ }
+    setChecking(false)
+  }
+
   async function doImport() {
     setStep('importing')
     setErr('')
@@ -247,8 +275,6 @@ export default function ImportButton() {
       setErr('Error de red'); setStep('mapping')
     }
   }
-
-  const mappedRequired = FIELDS.filter(f => f.required).every(f => mapping[f.key])
 
   return (
     <>
@@ -389,6 +415,27 @@ export default function ImportButton() {
                   {!mappedRequired && (
                     <p className="text-[11px] text-[#f59e0b]">⚠ Mapea Symbol, Date y Net P&L para continuar.</p>
                   )}
+
+                  {/* Duplicate check banner */}
+                  {mappedRequired && (
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => runCheck(trades)}
+                        disabled={checking || trades.length === 0}
+                        className="px-3 py-1.5 rounded-md bg-[#161b28] border border-[#232a3a] text-[#a4abbe] text-[11px] hover:border-[#2f384c] disabled:opacity-50 transition-colors"
+                      >
+                        {checking ? 'Verificando…' : '🔍 Verificar duplicados'}
+                      </button>
+                      {check && !checking && (
+                        <div className="flex items-center gap-3 text-[11px] font-mono">
+                          <span className="text-[#22c55e]">✓ {check.new} nuevos</span>
+                          {check.duplicates > 0 && (
+                            <span className="text-[#f59e0b]">⊘ {check.duplicates} duplicados</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </>
               )}
 
@@ -438,10 +485,14 @@ export default function ImportButton() {
                   </button>
                   <button
                     onClick={doImport}
-                    disabled={!mappedRequired || trades.length === 0}
+                    disabled={!mappedRequired || trades.length === 0 || (check !== null && check.new === 0)}
                     className="px-5 py-2 rounded-md bg-[#f59e0b] text-[#0b0e16] text-sm font-semibold hover:bg-[#d97706] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
-                    Importar {trades.length} trades
+                    {check
+                      ? check.new === 0
+                        ? 'Todo ya importado'
+                        : `Importar ${check.new} nuevos`
+                      : `Importar ${trades.length} trades`}
                   </button>
                 </>
               ) : step === 'idle' ? (

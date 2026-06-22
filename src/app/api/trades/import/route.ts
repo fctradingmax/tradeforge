@@ -21,7 +21,17 @@ interface TradeRow {
   mfe?: number | null
 }
 
+// Normalise to HH:MM (drop seconds) so "09:32:00" == "09:32".
+// Include net_pnl in cents to tell apart two trades on same symbol/time.
+function dedupeKey(symbol: string, date: string, open_time: string | null | undefined, net_pnl: number) {
+  const t = (open_time ?? '').slice(0, 5) // HH:MM
+  const p = Math.round((net_pnl ?? 0) * 100)
+  return `${symbol}|${date}|${t}|${p}`
+}
+
 export async function POST(request: NextRequest) {
+  const checkOnly = request.nextUrl.searchParams.get('check') === 'true'
+
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -32,14 +42,14 @@ export async function POST(request: NextRequest) {
   if (!incoming.length)
     return NextResponse.json({ error: 'No trades provided' }, { status: 400 })
 
-  // Fetch existing keys to detect duplicates
+  // Fetch existing trades for deduplication
   const { data: existing } = await supabase
     .from('trades')
-    .select('symbol, date, open_time')
+    .select('symbol, date, open_time, net_pnl')
     .eq('user_id', user.id)
 
   const existingSet = new Set(
-    (existing ?? []).map(t => `${t.symbol}|${t.date}|${t.open_time ?? ''}`)
+    (existing ?? []).map(t => dedupeKey(t.symbol, t.date, t.open_time, t.net_pnl))
   )
 
   const toInsert: (TradeRow & { user_id: string })[] = []
@@ -47,9 +57,14 @@ export async function POST(request: NextRequest) {
 
   for (const t of incoming) {
     if (!t.symbol || !t.date) continue
-    const key = `${t.symbol}|${t.date}|${t.open_time ?? ''}`
+    const key = dedupeKey(t.symbol, t.date, t.open_time, t.net_pnl)
     if (existingSet.has(key)) { skipped++; continue }
     toInsert.push({ ...t, user_id: user.id })
+  }
+
+  // Check-only mode: return counts without inserting
+  if (checkOnly) {
+    return NextResponse.json({ new: toInsert.length, duplicates: skipped, total: incoming.length })
   }
 
   if (!toInsert.length)
