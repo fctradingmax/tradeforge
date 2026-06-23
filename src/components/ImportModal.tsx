@@ -23,10 +23,24 @@ function parseCsvLine(line: string): string[] {
 }
 
 function parseCsv(text: string) {
-  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().split('\n')
-  const headers = parseCsvLine(lines[0]).map(h => h.replace(/^"|"$/g, '').trim())
+  // Strip BOM that Excel adds to UTF-8 CSVs
+  const clean = text.replace(/^﻿/, '')
+  const normalized = clean.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim()
+  const lines = normalized.split('\n')
+
+  // Auto-detect delimiter: tab or comma
+  const firstLine = lines[0]
+  const tabCount   = (firstLine.match(/\t/g) ?? []).length
+  const commaCount = (firstLine.match(/,/g) ?? []).length
+  const isTab = tabCount > commaCount
+
+  const parseLine = isTab
+    ? (line: string) => line.split('\t').map(s => s.trim())
+    : parseCsvLine
+
+  const headers = parseLine(lines[0]).map(h => h.replace(/^"|"$/g, '').trim())
   const rows = lines.slice(1).filter(l => l.trim()).map(line => {
-    const vals = parseCsvLine(line)
+    const vals = parseLine(line)
     const obj: Record<string, string> = {}
     headers.forEach((h, i) => { obj[h] = (vals[i] ?? '').trim() })
     return obj
@@ -52,17 +66,17 @@ const FIELDS: { key: string; label: string; required?: boolean }[] = [
 ]
 
 const ALIASES: Record<string, string[]> = {
-  symbol:     ['symbol', 'sym', 'ticker', 'stock'],
-  date:       ['date', 'trade date', 'fecha'],
-  open_time:  ['open', 'entry', 'entry time', 'open time', 'time in', 'apertura'],
-  close_time: ['close', 'exit', 'exit time', 'close time', 'time out', 'cierre'],
-  max_size:   ['size', 'max size', 'shares', 'qty', 'quantity', 'tam', 'tam.'],
-  n_fills:    ['fills', 'n fills', 'executions'],
-  avg_buy:    ['avg buy', 'buy', 'buy price', 'entry price', 'avg entry'],
-  avg_sell:   ['avg sell', 'sell', 'sell price', 'exit price', 'avg exit'],
-  gross:      ['gross', 'gross pnl', 'gross p&l', 'bruto'],
-  fees:       ['fees', 'fee', 'commission', 'comm', 'comisión'],
-  net_pnl:    ['net', 'neto', 'net pnl', 'net p&l', 'p&l', 'pnl'],
+  symbol:     ['symbol', 'sym', 'ticker', 'stock', 'instrumento', 'instrument', 'security'],
+  date:       ['date', 'trade date', 'fecha', 'entry date', 'open date', 'transaction date', 'trade_date', 'tradedate', 'day'],
+  open_time:  ['open', 'entry', 'entry time', 'open time', 'time in', 'apertura', 'open_time', 'entrytime', 'time', 'hora entrada', 'entry_time'],
+  close_time: ['close', 'exit', 'exit time', 'close time', 'time out', 'cierre', 'close_time', 'exittime', 'hora salida', 'exit_time'],
+  max_size:   ['size', 'max size', 'shares', 'qty', 'quantity', 'tam', 'tam.', 'position size', 'max_size', 'maxsize', 'pos size', 'contracts', 'volume'],
+  n_fills:    ['fills', 'n fills', 'executions', 'n_fills', 'trades', 'num trades', 'number of trades'],
+  avg_buy:    ['avg buy', 'buy', 'buy price', 'entry price', 'avg entry', 'avg_buy', 'avgbuy', 'open price', 'precio entrada', 'avg open', 'purchase price'],
+  avg_sell:   ['avg sell', 'sell', 'sell price', 'exit price', 'avg exit', 'avg_sell', 'avgsell', 'close price', 'precio salida', 'avg close', 'sale price'],
+  gross:      ['gross', 'gross pnl', 'gross p&l', 'bruto', 'gross_pnl', 'gross profit', 'gross profit/loss'],
+  fees:       ['fees', 'fee', 'commission', 'comm', 'comisión', 'commissions', 'comm/fee', 'brokerage'],
+  net_pnl:    ['net', 'neto', 'net pnl', 'net p&l', 'p&l', 'pnl', 'net_pnl', 'realized p/l', 'realized pnl', 'net profit', 'net profit/loss', 'total p/l', 'p/l', 'profit/loss', 'profit', 'net amount', 'gain/loss'],
   mae:        ['mae', 'max adverse', 'max adverse excursion'],
   mfe:        ['mfe', 'max favorable', 'max favorable excursion'],
 }
@@ -220,9 +234,10 @@ export default function ImportButton() {
   }
 
   function loadFile(f: File) {
-    const isCsv = f.name.endsWith('.csv') || f.type.includes('csv') || f.type.includes('text/plain')
+    const isCsv = f.name.endsWith('.csv') || f.name.endsWith('.txt') || f.name.endsWith('.tsv') ||
+      f.type.includes('csv') || f.type.includes('text/plain') || f.type.includes('text/tab')
     if (!isCsv && !isExcel(f)) {
-      setErr('Por favor selecciona un archivo CSV o Excel (.xls, .xlsx).'); return
+      setErr('Por favor selecciona un archivo CSV, TSV, TXT o Excel (.xls, .xlsx).'); return
     }
 
     if (isExcel(f)) {
@@ -361,12 +376,12 @@ export default function ImportButton() {
                   >
                     <div className="text-[32px] mb-3 opacity-40">↑</div>
                     <p className="text-[13px] text-[#a4abbe] font-medium">Arrastra tu archivo aquí o haz clic para buscar</p>
-                    <p className="text-[11px] text-[#4a5266] mt-1">CSV · Excel XLS · Excel XLSX</p>
+                    <p className="text-[11px] text-[#4a5266] mt-1">CSV · TSV · TXT · Excel XLS/XLSX</p>
                   </div>
                   <input
                     ref={inputRef}
                     type="file"
-                    accept=".csv,.xls,.xlsx,text/csv,text/plain,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    accept=".csv,.tsv,.txt,.xls,.xlsx,text/csv,text/plain,text/tab-separated-values,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     className="hidden"
                     onChange={e => { const f = e.target.files?.[0]; if (f) loadFile(f) }}
                   />
@@ -399,25 +414,33 @@ export default function ImportButton() {
 
                   {/* Column mapping */}
                   <div>
-                    <p className="text-[11px] font-semibold text-[#a4abbe] mb-2">Mapeo de columnas</p>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[11px] font-semibold text-[#a4abbe]">Mapeo de columnas</p>
+                      <span className="text-[10px] text-[#4a5266]">* obligatorio — selecciona la columna correcta si aparece «sin mapear»</span>
+                    </div>
                     <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
-                      {FIELDS.map(f => (
-                        <div key={f.key} className="flex items-center gap-2">
-                          <span className="text-[10px] text-[#6d7589] w-24 shrink-0">
-                            {f.label}{f.required && <span className="text-[#ef4444]"> *</span>}
-                          </span>
-                          <select
-                            value={mapping[f.key] ?? ''}
-                            onChange={e => setMapping(m => ({ ...m, [f.key]: e.target.value }))}
-                            className="flex-1 bg-[#161b28] border border-[#232a3a] text-[#e8ecf2] rounded px-2 py-1 text-[10px] font-mono focus:outline-none focus:border-[#f59e0b]"
-                          >
-                            <option value="">— sin mapear —</option>
-                            {file.headers.map(h => (
-                              <option key={h} value={h}>{h}</option>
-                            ))}
-                          </select>
-                        </div>
-                      ))}
+                      {FIELDS.map(f => {
+                        const missing = f.required && !mapping[f.key]
+                        return (
+                          <div key={f.key} className="flex items-center gap-2">
+                            <span className={`text-[10px] w-24 shrink-0 ${missing ? 'text-[#ef4444] font-semibold' : 'text-[#6d7589]'}`}>
+                              {f.label}{f.required && <span className="text-[#ef4444]"> *</span>}
+                            </span>
+                            <select
+                              value={mapping[f.key] ?? ''}
+                              onChange={e => setMapping(m => ({ ...m, [f.key]: e.target.value }))}
+                              className={`flex-1 bg-[#161b28] border rounded px-2 py-1 text-[10px] font-mono focus:outline-none focus:border-[#f59e0b] ${
+                                missing ? 'border-[#ef4444] text-[#ef4444]' : 'border-[#232a3a] text-[#e8ecf2]'
+                              }`}
+                            >
+                              <option value="">— sin mapear —</option>
+                              {file.headers.map(h => (
+                                <option key={h} value={h}>{h}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
 
@@ -461,7 +484,11 @@ export default function ImportButton() {
                   )}
 
                   {!mappedRequired && (
-                    <p className="text-[11px] text-[#f59e0b]">⚠ Mapea Symbol, Date y Net P&L para continuar.</p>
+                    <div className="rounded-lg bg-[rgba(239,68,68,0.08)] border border-[rgba(239,68,68,0.25)] px-3 py-2">
+                      <p className="text-[11px] text-[#ef4444] font-medium">
+                        ⚠ Asigna las columnas marcadas en rojo (Symbol, Date, Net P&L) usando los desplegables de arriba.
+                      </p>
+                    </div>
                   )}
 
                   {/* Duplicate check banner */}
