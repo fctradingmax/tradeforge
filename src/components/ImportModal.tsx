@@ -108,6 +108,142 @@ function isTradeForgeFormat(headers: string[]): boolean {
   return TF_REQUIRED.every(req => lower.some(h => h === req || h.includes(req)))
 }
 
+// ── CMEG brokerage fills report ────────────────────────────────────────────────
+// Format: hierarchical XLS — date row, then repeating "SYMBOL - Name" blocks,
+// each containing fill rows + a Bought/Sold summary section.
+
+type DirectTrade = {
+  symbol: string | null; date: string | null; open_time: string | null
+  close_time: string | null; open_side: 'B' | 'S' | null
+  avg_buy: number | null; avg_sell: number | null
+  buy_qty: number | null; sell_qty: number | null
+  max_size: number | null; n_fills: number | null; holding_sec: number | null
+  gross: number | null; fees: number | null; net_pnl: number
+  mae: null; mfe: null
+}
+
+function isCMEGXls(raw: unknown[][]): boolean {
+  if (raw.length < 3) return false
+  const r1 = String(raw[1]?.[0] ?? '').trim()
+  const r2 = raw[2]
+  return /^[A-Z]+\s*-\s*/.test(r1)
+    && String(r2?.[0] ?? '') === 'Time'
+    && String(r2?.[5] ?? '') === 'B/S'
+}
+
+function parseCMEGXls(raw: unknown[][]): DirectTrade[] {
+  // Date is in row 0, col 0 — could be Date object or ISO string
+  const dateCell = raw[0]?.[0]
+  let tradeDate = ''
+  if (dateCell instanceof Date) {
+    const y = dateCell.getUTCFullYear()
+    const mo = String(dateCell.getUTCMonth() + 1).padStart(2, '0')
+    const d  = String(dateCell.getUTCDate()).padStart(2, '0')
+    tradeDate = `${y}-${mo}-${d}`
+  } else {
+    const m = String(dateCell ?? '').match(/^(\d{4}-\d{2}-\d{2})/)
+    if (m) tradeDate = m[1]
+  }
+
+  const results: DirectTrade[] = []
+  let i = 1
+
+  const toSec = (t: string) => {
+    const [h, m, s] = t.split(':').map(Number)
+    return h * 3600 + m * 60 + (s || 0)
+  }
+
+  while (i < raw.length) {
+    const cell0 = String(raw[i]?.[0] ?? '').trim()
+
+    // Symbol block header: "TICKER - Company Name"
+    if (/^[A-Z]+\s*-\s*/.test(cell0)) {
+      const symbol = cell0.split(/\s*-\s*/)[0].trim()
+      i += 2 // skip symbol row + column header row
+
+      // Collect individual fills until the "Orders/Fills" summary row
+      type Fill = { time: string; side: 'B'|'S'; qty: number; price: number; position: number; gross: number; net: number }
+      const fills: Fill[] = []
+
+      while (i < raw.length) {
+        const r = raw[i]
+        const t = String(r?.[0] ?? '').trim()
+        if (!t && String(r?.[1] ?? '').trim() === 'Orders') break // summary sentinel
+        if (/^\d{1,2}:\d{2}:\d{2}/.test(t)) {
+          fills.push({
+            time: t.slice(0, 8),
+            side: String(r[5] ?? '') as 'B' | 'S',
+            qty: Number(r[6]) || 0,
+            price: Number(r[7]) || 0,
+            position: Number(r[8]) || 0,
+            gross: Number(r[9]) || 0,
+            net: Number(r[21]) || 0,
+          })
+        }
+        i++
+      }
+
+      // Skip past summary section (Bought / Sold / totals) until blank separator
+      while (i < raw.length) {
+        const c0 = String(raw[i]?.[0] ?? '').trim()
+        const c1 = String(raw[i]?.[1] ?? '').trim()
+        i++
+        if (!c0 && !c1) break // blank separator between symbol blocks
+      }
+
+      if (!fills.length) continue
+
+      // Split fills into round-trip trades: each time position hits 0 = closed trade
+      let start = 0
+      for (let j = 0; j < fills.length; j++) {
+        if (fills[j].position === 0 || j === fills.length - 1) {
+          const tf = fills.slice(start, j + 1)
+          if (!tf.length) { start = j + 1; continue }
+
+          const buys  = tf.filter(f => f.side === 'B')
+          const sells = tf.filter(f => f.side === 'S')
+          const buyQty   = buys.reduce((s, f) => s + f.qty, 0)
+          const sellQty  = sells.reduce((s, f) => s + f.qty, 0)
+          const avgBuy   = buyQty  ? buys.reduce((s, f)  => s + f.price * f.qty, 0) / buyQty  : null
+          const avgSell  = sellQty ? sells.reduce((s, f) => s + f.price * f.qty, 0) / sellQty : null
+          const maxPos   = Math.max(...tf.map(f => Math.abs(f.position)), 0)
+          const gross    = tf.reduce((s, f) => s + f.gross, 0)
+          const netPnl   = tf.reduce((s, f) => s + f.net,   0)
+          const fees     = gross - netPnl // always positive (fees reduce net vs gross)
+          const openTime  = tf[0].time
+          const closeTime = tf[tf.length - 1].time
+
+          results.push({
+            symbol,
+            date: tradeDate,
+            open_time: openTime,
+            close_time: closeTime,
+            open_side: tf[0].side,
+            avg_buy:  avgBuy  != null ? Math.round(avgBuy  * 10000) / 10000 : null,
+            avg_sell: avgSell != null ? Math.round(avgSell * 10000) / 10000 : null,
+            buy_qty:  buyQty  || null,
+            sell_qty: sellQty || null,
+            max_size: maxPos  || null,
+            n_fills:  tf.length,
+            holding_sec: Math.max(0, toSec(closeTime) - toSec(openTime)),
+            gross:   Math.round(gross  * 100) / 100,
+            fees:    Math.round(Math.abs(fees) * 100) / 100,
+            net_pnl: Math.round(netPnl * 100) / 100,
+            mae: null,
+            mfe: null,
+          })
+
+          start = j + 1
+        }
+      }
+      continue
+    }
+    i++
+  }
+
+  return results
+}
+
 // ── Value parsing ──────────────────────────────────────────────────────────────
 function parseNum(s: string): number | null {
   if (!s || s === '—' || s === '-' || s === '') return null
@@ -190,6 +326,7 @@ interface ParsedFile {
   headers: string[]
   rows: Record<string, string>[]
   isTF: boolean
+  isCMEG: boolean
 }
 
 export default function ImportButton() {
@@ -202,11 +339,12 @@ export default function ImportButton() {
   const [result, setResult] = useState<{ imported: number; skipped: number } | null>(null)
   const [check, setCheck]  = useState<{ new: number; duplicates: number; total: number } | null>(null)
   const [checking, setChecking] = useState(false)
-  const [err, setErr]     = useState('')
+  const [err, setErr]         = useState('')
+  const [directTrades, setDirectTrades] = useState<DirectTrade[] | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   function reset() {
-    setStep('idle'); setFile(null); setMapping({}); setResult(null); setCheck(null); setErr('')
+    setStep('idle'); setFile(null); setMapping({}); setResult(null); setCheck(null); setErr(''); setDirectTrades(null)
   }
 
   function close() { setOpen(false); reset() }
@@ -214,7 +352,7 @@ export default function ImportButton() {
   function applyParsed(headers: string[], rows: Record<string, string>[]) {
     const isTF      = isTradeForgeFormat(headers)
     const detected  = autoMap(headers)
-    setFile({ headers, rows, isTF })
+    setFile({ headers, rows, isTF, isCMEG: false })
     setMapping(detected)
     setCheck(null)
     setStep('mapping')
@@ -250,6 +388,21 @@ export default function ImportButton() {
           const ws     = wb.Sheets[wb.SheetNames[0]]
           const raw    = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '' })
           if (!raw.length) { setErr('La hoja está vacía.'); return }
+
+          // CMEG fills report — parse directly, skip column-mapping step
+          if (isCMEGXls(raw as unknown[][])) {
+            const parsed = parseCMEGXls(raw as unknown[][])
+            if (!parsed.length) { setErr('No se encontraron trades en el archivo CMEG.'); return }
+            setDirectTrades(parsed)
+            setFile({ headers: [], rows: [], isTF: false, isCMEG: true })
+            setCheck(null)
+            setStep('mapping')
+            setErr('')
+            setTimeout(() => runCheck(parsed as typeof trades), 0)
+            return
+          }
+
+          // Generic XLS — convert to column-keyed rows for mapping step
           const headers = (raw[0] as unknown[]).map(h => String(h ?? '').trim()).filter(Boolean)
           const rows    = (raw.slice(1) as unknown[][])
             .filter(r => r.some(v => v !== '' && v != null))
@@ -257,11 +410,10 @@ export default function ImportButton() {
               const obj: Record<string, string> = {}
               headers.forEach((h, i) => {
                 const v = r[i]
-                // cellDates: true gives Date objects for date cells
                 if (v instanceof Date) {
-                  const mm = String(v.getMonth() + 1).padStart(2, '0')
-                  const dd = String(v.getDate()).padStart(2, '0')
-                  obj[h] = `${v.getFullYear()}-${mm}-${dd}`
+                  const mm = String(v.getUTCMonth() + 1).padStart(2, '0')
+                  const dd = String(v.getUTCDate()).padStart(2, '0')
+                  obj[h] = `${v.getUTCFullYear()}-${mm}-${dd}`
                 } else {
                   obj[h] = String(v ?? '').trim()
                 }
@@ -295,13 +447,13 @@ export default function ImportButton() {
     if (f) loadFile(f)
   }, [])
 
-  const trades = file
-    ? file.rows.map(r => rowToTrade(r, mapping)).filter(t => t.symbol && t.date && t.net_pnl !== undefined)
-    : []
+  const trades = (file?.isCMEG && directTrades)
+    ? directTrades as ReturnType<typeof rowToTrade>[]
+    : (file ? file.rows.map(r => rowToTrade(r, mapping)).filter(t => t.symbol && t.date && t.net_pnl !== undefined) : [])
 
   const previewRows = trades.slice(0, 5)
 
-  const mappedRequired = FIELDS.filter(f => f.required).every(f => mapping[f.key])
+  const mappedRequired = file?.isCMEG ? true : FIELDS.filter(f => f.required).every(f => mapping[f.key])
 
   async function runCheck(tradeList: typeof trades) {
     if (!tradeList.length) return
@@ -403,16 +555,25 @@ export default function ImportButton() {
                   {/* Format badge */}
                   <div className="flex items-center gap-2">
                     <span className={`text-[10px] px-2 py-0.5 rounded font-semibold ${
-                      file.isTF
-                        ? 'bg-[rgba(34,197,94,0.1)] text-[#22c55e] border border-[rgba(34,197,94,0.2)]'
-                        : 'bg-[rgba(245,158,11,0.1)] text-[#f59e0b] border border-[rgba(245,158,11,0.2)]'
+                      file.isCMEG
+                        ? 'bg-[rgba(59,130,246,0.1)] text-[#3b82f6] border border-[rgba(59,130,246,0.2)]'
+                        : file.isTF
+                          ? 'bg-[rgba(34,197,94,0.1)] text-[#22c55e] border border-[rgba(34,197,94,0.2)]'
+                          : 'bg-[rgba(245,158,11,0.1)] text-[#f59e0b] border border-[rgba(245,158,11,0.2)]'
                     }`}>
-                      {file.isTF ? '✓ TradeForge CSV detectado' : 'CSV genérico — verifica el mapeo'}
+                      {file.isCMEG
+                        ? '✓ CMEG Detailed Report detectado'
+                        : file.isTF
+                          ? '✓ TradeForge CSV detectado'
+                          : 'CSV genérico — verifica el mapeo'}
                     </span>
-                    <span className="text-[11px] text-[#4a5266] font-mono">{file.rows.length} filas en archivo</span>
+                    <span className="text-[11px] text-[#4a5266] font-mono">
+                      {file.isCMEG ? `${trades.length} trades extraídos` : `${file.rows.length} filas en archivo`}
+                    </span>
                   </div>
 
-                  {/* Column mapping */}
+                  {/* Column mapping — hidden for CMEG (already parsed directly) */}
+                  {!file.isCMEG && (
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <p className="text-[11px] font-semibold text-[#a4abbe]">Mapeo de columnas</p>
@@ -443,6 +604,7 @@ export default function ImportButton() {
                       })}
                     </div>
                   </div>
+                  )} {/* end !file.isCMEG column mapping */}
 
                   {/* Preview */}
                   {previewRows.length > 0 && (
@@ -483,7 +645,7 @@ export default function ImportButton() {
                     </div>
                   )}
 
-                  {!mappedRequired && (
+                  {!file.isCMEG && !mappedRequired && (
                     <div className="rounded-lg bg-[rgba(239,68,68,0.08)] border border-[rgba(239,68,68,0.25)] px-3 py-2">
                       <p className="text-[11px] text-[#ef4444] font-medium">
                         ⚠ Asigna las columnas marcadas en rojo (Symbol, Date, Net P&L) usando los desplegables de arriba.
